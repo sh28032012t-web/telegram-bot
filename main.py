@@ -39,7 +39,9 @@ async def handle_start(message: Message):
 
 @dp.message()
 async def handle_message(message: Message):
-    if message.text == "Это мой бот":
+    print(f"Получено сообщение: {message.text!r}")
+
+    if message.text and message.text.lower().strip() == "это мой бот":
         await message.answer("Я бот, который выполняет команды 🙂")
 
 
