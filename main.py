@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 
 from aiohttp import web
 from dotenv import load_dotenv
@@ -9,17 +10,34 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 
-# Загружаем переменные из .env
+# =========================
+# LOGGING
+# =========================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+# =========================
+# ENVIRONMENT
+# =========================
+
 load_dotenv()
 
-# Получаем токен
 BOT_TOKEN = os.getenv("TOKEN")
 
 if not BOT_TOKEN:
     raise ValueError("Переменная TOKEN не найдена")
 
 
-# Создаём бота и диспетчер
+# =========================
+# BOT
+# =========================
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -30,6 +48,8 @@ dp = Dispatcher()
 
 @dp.message(Command("start"))
 async def handle_start(message: Message):
+    logger.info(f"Получена команда: {message.text!r}")
+
     await message.answer("Привет! 👋")
 
 
@@ -39,10 +59,20 @@ async def handle_start(message: Message):
 
 @dp.message()
 async def handle_message(message: Message):
-    print(f"Получено сообщение: {message.text!r}")
+    logger.info(
+        f"Получено сообщение: text={message.text!r}, "
+        f"chat_id={message.chat.id}"
+    )
 
-    if message.text and message.text.lower().strip() == "это мой бот":
-        await message.answer("Я бот, который выполняет команды 🙂")
+    if not message.text:
+        return
+
+    text = message.text.lower().strip()
+
+    if text == "это мой бот":
+        await message.answer(
+            "Я бот, который выполняет команды 🙂"
+        )
 
 
 # =========================
@@ -61,7 +91,6 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
 
-    # Render предоставляет PORT автоматически
     port = int(os.getenv("PORT", 10000))
 
     site = web.TCPSite(
@@ -72,7 +101,7 @@ async def start_web_server():
 
     await site.start()
 
-    print(f"Web server started on port {port}")
+    logger.info(f"Web server started on port {port}")
 
 
 # =========================
@@ -82,10 +111,21 @@ async def start_web_server():
 async def main():
     await start_web_server()
 
-    print("Bot started!")
+    logger.info("Bot started!")
 
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
 
+    except Exception:
+        logger.exception("Ошибка во время работы бота")
+
+    finally:
+        await bot.session.close()
+
+
+# =========================
+# START
+# =========================
 
 if __name__ == "__main__":
     asyncio.run(main())
