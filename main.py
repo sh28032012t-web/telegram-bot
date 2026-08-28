@@ -87,47 +87,11 @@ async def handle_start(message: Message):
 # О БОТЕ
 # =========================
 
-@dp.message(lambda message: message.text == "🤖 О боте")
+@dp.message(lambda message: message.text == "Кто твой создатель")
 async def about_bot(message: Message):
 
     await message.answer(
-        "🤖 Я Telegram-бот.\n\n"
-        "Я умею выполнять команды в чате."
-    )
-
-
-# =========================
-# РАЗДЕЛ "КОМАНДЫ"
-# =========================
-
-@dp.message(lambda message: message.text == "📋 Команды")
-async def commands_menu(message: Message):
-
-    await message.answer(
-        "📋 <b>Команды бота</b>\n\n"
-
-        "🤗 <b>Обнять</b>\n"
-        "Ответь на сообщение пользователя "
-        "словом <code>Обнять</code>.\n\n"
-
-        "💬 <b>Ответить</b>\n"
-        "Ответь на сообщение пользователя "
-        "словом <code>Ответить</code>.\n\n"
-
-        "⬆️ Новые команды можно добавлять в этот список.",
-        parse_mode="HTML"
-    )
-
-
-# =========================
-# ЭТО МОЙ БОТ
-# =========================
-
-@dp.message(lambda message: message.text == "💬 Это мой бот")
-async def my_bot_button(message: Message):
-
-    await message.answer(
-        "Я бот, который выполняет команды 🙂"
+        "DaLz"
     )
 
 
