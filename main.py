@@ -1,9 +1,7 @@
 import os
 import asyncio
 import logging
-import random
 
-import asyncpg
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -13,10 +11,24 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
     KeyboardButton,
-    FSInputFile,
 )
 
-from lucky_blocks import LUCKY_BLOCKS
+from database import (
+    init_database,
+    save_user,
+    close_database,
+)
+
+from lucky_blocks import (
+    get_enabled_blocks,
+    get_block_names,
+    find_block_by_name,
+    open_lucky_block,
+)
+
+from profile import (
+    register_profile_handlers,
+)
 
 
 # ============================================================
@@ -28,7 +40,9 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(
+    __name__
+)
 
 
 # ============================================================
@@ -37,8 +51,13 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+BOT_TOKEN = os.getenv(
+    "TOKEN"
+)
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL"
+)
 
 if not BOT_TOKEN:
     raise ValueError(
@@ -61,24 +80,9 @@ bot = Bot(
 
 dp = Dispatcher()
 
-db_pool = None
-
 
 # ============================================================
-# ПРОВЕРКА ЛАКИ БЛОКОВ
-# ============================================================
-
-def get_enabled_blocks():
-
-    return {
-        block_id: block
-        for block_id, block in LUCKY_BLOCKS.items()
-        if block.get("enabled", True)
-    }
-
-
-# ============================================================
-# МЕНЮ
+# ГЛАВНОЕ МЕНЮ
 # ============================================================
 
 main_menu = ReplyKeyboardMarkup(
@@ -98,13 +102,17 @@ main_menu = ReplyKeyboardMarkup(
 )
 
 
+# ============================================================
+# МЕНЮ ЛАКИ БЛОКОВ
+# ============================================================
+
 def create_lucky_blocks_menu():
 
-    enabled_blocks = get_enabled_blocks()
+    blocks = get_enabled_blocks()
 
     buttons = []
 
-    for block_id, block in enabled_blocks.items():
+    for block in blocks.values():
 
         buttons.append(
             [
@@ -129,129 +137,19 @@ def create_lucky_blocks_menu():
 
 
 # ============================================================
-# DATABASE
-# ============================================================
-
-async def init_database():
-
-    global db_pool
-
-    logger.info(
-        "Connecting to PostgreSQL..."
-    )
-
-    db_pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=1,
-        max_size=5,
-        command_timeout=30,
-    )
-
-    async with db_pool.acquire() as connection:
-
-        await connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS public.base_users (
-                id BIGSERIAL PRIMARY KEY,
-                tg_id BIGINT NOT NULL UNIQUE,
-                first_name TEXT,
-                last_name TEXT,
-                username TEXT,
-                rank INTEGER NOT NULL DEFAULT 1,
-                first_message_at TIMESTAMPTZ
-                    NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-
-        await connection.execute(
-            """
-            ALTER TABLE public.base_users
-            ADD COLUMN IF NOT EXISTS rank
-            INTEGER NOT NULL DEFAULT 1
-            """
-        )
-
-    logger.info(
-        "PostgreSQL connected successfully"
-    )
-
-
-# ============================================================
-# SAVE USER
-# ============================================================
-
-async def save_user(message: Message):
-
-    if db_pool is None:
-        return
-
-    if message.from_user is None:
-        return
-
-    user = message.from_user
-
-    async with db_pool.acquire() as connection:
-
-        await connection.execute(
-            """
-            INSERT INTO public.base_users (
-                tg_id,
-                first_name,
-                last_name,
-                username
-            )
-            VALUES ($1, $2, $3, $4)
-
-            ON CONFLICT (tg_id)
-            DO UPDATE SET
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
-                username = EXCLUDED.username
-            """,
-
-            user.id,
-            user.first_name,
-            user.last_name,
-            user.username,
-        )
-
-
-# ============================================================
-# GET USER RANK
-# ============================================================
-
-async def get_user_rank(
-    user_id: int
-) -> int:
-
-    if db_pool is None:
-        return 1
-
-    async with db_pool.acquire() as connection:
-
-        rank = await connection.fetchval(
-            """
-            SELECT rank
-            FROM public.base_users
-            WHERE tg_id = $1
-            """,
-            user_id,
-        )
-
-    return rank or 1
-
-
-# ============================================================
 # START
 # ============================================================
 
-@dp.message(CommandStart())
+@dp.message(
+    CommandStart()
+)
 async def start_handler(
     message: Message
 ):
 
-    await save_user(message)
+    await save_user(
+        message
+    )
 
     await message.answer(
         "👋 Добро пожаловать!\n\n"
@@ -261,38 +159,7 @@ async def start_handler(
 
 
 # ============================================================
-# ПРОФИЛЬ
-# ============================================================
-
-@dp.message(
-    F.text == "👤 Профиль"
-)
-async def profile_handler(
-    message: Message
-):
-
-    await save_user(message)
-
-    if message.from_user is None:
-        return
-
-    user = message.from_user
-
-    rank = await get_user_rank(
-        user.id
-    )
-
-    await message.answer(
-        f"👤 Профиль\n\n"
-        f"Ник: {user.full_name}\n"
-        f"ID: {user.id}\n"
-        f"Ранг: {rank}",
-        reply_markup=main_menu,
-    )
-
-
-# ============================================================
-# ЛАКИ БЛОКИ — МЕНЮ
+# ЛАКИ БЛОКИ
 # ============================================================
 
 @dp.message(
@@ -302,11 +169,13 @@ async def lucky_blocks_handler(
     message: Message
 ):
 
-    await save_user(message)
+    await save_user(
+        message
+    )
 
-    menu = create_lucky_blocks_menu()
+    blocks = get_enabled_blocks()
 
-    if not get_enabled_blocks():
+    if not blocks:
 
         await message.answer(
             "😔 Сейчас нет доступных "
@@ -318,7 +187,7 @@ async def lucky_blocks_handler(
 
     await message.answer(
         "🎁 Выбери лаки блок:",
-        reply_markup=menu,
+        reply_markup=create_lucky_blocks_menu(),
     )
 
 
@@ -334,153 +203,27 @@ async def back_handler(
 ):
 
     await message.answer(
-        "Главное меню:",
+        "🏠 Главное меню:",
         reply_markup=main_menu,
     )
-
-
-# ============================================================
-# НАЙТИ БЛОК ПО НАЗВАНИЮ
-# ============================================================
-
-def find_block_by_name(
-    block_name: str
-):
-
-    for block_id, block in get_enabled_blocks().items():
-
-        if block["name"] == block_name:
-
-            return block_id, block
-
-    return None, None
 
 
 # ============================================================
 # ОТКРЫТИЕ ЛАКИ БЛОКА
 # ============================================================
 
-async def open_lucky_block(
-    message: Message,
-    block_id: str,
-    block: dict,
-):
-
-    await save_user(message)
-
-    rewards = block["rewards"]
-
-    # --------------------------------------------------------
-    # Выбираем награду по шансам
-    # --------------------------------------------------------
-
-    result = random.choices(
-        population=rewards,
-        weights=[
-            reward["chance"]
-            for reward in rewards
-        ],
-        k=1,
-    )[0]
-
-    reward_id = result["id"]
-    rarity = result["rarity"]
-    chance = result["chance"]
-    photo_path = result["photo"]
-
-    # --------------------------------------------------------
-    # Текст результата
-    # --------------------------------------------------------
-
-    caption = (
-        "🎉 Лаки блок открыт!\n\n"
-        f"🎁 {block['name']}\n\n"
-        f"🏆 Награда: {reward_id}\n"
-        f"✨ Редкость: {rarity}\n"
-        f"🎲 Шанс: {chance}%"
-    )
-
-    logger.info(
-        f"User opened {block_id} | "
-        f"reward={reward_id} | "
-        f"chance={chance}%"
-    )
-
-    # --------------------------------------------------------
-    # Проверяем фотографию
-    # --------------------------------------------------------
-
-    if not photo_path:
-
-        await message.answer(
-            caption
-        )
-
-        return
-
-    if not os.path.isfile(photo_path):
-
-        logger.error(
-            f"Фото не найдено: "
-            f"{photo_path}"
-        )
-
-        await message.answer(
-            caption
-            + "\n\n"
-            "⚠️ Фото этой награды "
-            "не найдено."
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # Отправляем фото
-    # --------------------------------------------------------
-
-    try:
-
-        photo = FSInputFile(
-            photo_path
-        )
-
-        await message.answer_photo(
-            photo=photo,
-            caption=caption,
-        )
-
-        logger.info(
-            f"Photo sent successfully: "
-            f"{photo_path}"
-        )
-
-    except Exception:
-
-        logger.exception(
-            "Не удалось отправить фотографию"
-        )
-
-        await message.answer(
-            caption
-        )
-
-
-# ============================================================
-# КНОПКИ ЛАКИ БЛОКОВ
-# ============================================================
-
 @dp.message(
     F.text.in_(
-        [
-            block["name"]
-            for block in LUCKY_BLOCKS.values()
-            if block.get("enabled", True)
-        ]
+        get_block_names()
     )
 )
-async def lucky_block_open_handler(
+async def lucky_block_handler(
     message: Message
 ):
+
+    await save_user(
+        message
+    )
 
     if not message.text:
         return
@@ -492,8 +235,8 @@ async def lucky_block_open_handler(
     if block is None:
 
         await message.answer(
-            "⚠️ Этот лаки блок сейчас "
-            "недоступен.",
+            "⚠️ Этот лаки блок "
+            "сейчас недоступен.",
             reply_markup=main_menu,
         )
 
@@ -507,7 +250,7 @@ async def lucky_block_open_handler(
 
 
 # ============================================================
-# НЕИЗВЕСТНЫЕ СООБЩЕНИЯ
+# НЕИЗВЕСТНОЕ СООБЩЕНИЕ
 # ============================================================
 
 @dp.message()
@@ -578,24 +321,21 @@ async def start_web_server():
 
 async def main():
 
-    global db_pool
-
     logger.info(
         "STARTING BOT"
     )
 
     # --------------------------------------------------------
-    # Проверяем конфигурацию блоков
+    # Загружаем лаки блоки
     # --------------------------------------------------------
 
-    enabled_blocks = get_enabled_blocks()
+    blocks = get_enabled_blocks()
 
     logger.info(
-        f"Lucky blocks loaded: "
-        f"{len(enabled_blocks)}"
+        f"Lucky blocks loaded: {len(blocks)}"
     )
 
-    for block_id, block in enabled_blocks.items():
+    for block_id, block in blocks.items():
 
         logger.info(
             f"Loaded block: "
@@ -606,10 +346,12 @@ async def main():
     # PostgreSQL
     # --------------------------------------------------------
 
-    await init_database()
+    await init_database(
+        DATABASE_URL
+    )
 
     # --------------------------------------------------------
-    # Web Server для Render
+    # Web Server
     # --------------------------------------------------------
 
     web_runner = await start_web_server()
@@ -629,7 +371,7 @@ async def main():
         )
 
         # ----------------------------------------------------
-        # Удаляем webhook перед polling
+        # Удаляем webhook
         # ----------------------------------------------------
 
         await bot.delete_webhook(
@@ -641,7 +383,7 @@ async def main():
         )
 
         # ----------------------------------------------------
-        # Polling
+        # Запускаем polling
         # ----------------------------------------------------
 
         await dp.start_polling(
@@ -663,9 +405,7 @@ async def main():
             "Stopping bot..."
         )
 
-        if db_pool is not None:
-
-            await db_pool.close()
+        await close_database()
 
         await bot.session.close()
 
@@ -674,6 +414,15 @@ async def main():
         logger.info(
             "Bot stopped"
         )
+
+
+# ============================================================
+# РЕГИСТРАЦИЯ HANDLERS
+# ============================================================
+
+register_profile_handlers(
+    dp
+)
 
 
 # ============================================================
