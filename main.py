@@ -101,30 +101,20 @@ async def handle_message(message: Message):
 
     text = message.text.strip()
 
-    logger.info(
-        f"Сообщение: {text!r}, "
-        f"chat_id={message.chat.id}"
-    )
-
-    # Проверяем, начинается ли сообщение с "Обнять"
     if not text.lower().startswith("обнять"):
         return
 
-    # Кто написал "Обнять"
     if not message.from_user:
         return
 
     sender = message.from_user
 
-    # ==================================
+    # =========================
     # ВАРИАНТ 1:
-    # Ответ на сообщение
-    #
-    # Обнять
-    # ↑ это reply на сообщение пользователя
-    # ==================================
+    # "Обнять" в ответ на сообщение
+    # =========================
 
-    if message.reply_to_message:
+    if text.lower() == "обнять" and message.reply_to_message:
 
         target = message.reply_to_message.from_user
 
@@ -134,38 +124,57 @@ async def handle_message(message: Message):
             )
             return
 
-        sender_name = user_link(sender)
-        target_name = user_link(target)
+        sender_name = html.escape(sender.full_name)
+        target_name = html.escape(target.full_name)
 
         await message.answer(
-            f"🤗 | {sender_name} обнял {target_name}"
+            f'🤗 | <a href="tg://user?id={sender.id}">'
+            f'{sender_name}</a> обнял '
+            f'<a href="tg://user?id={target.id}">'
+            f'{target_name}</a>',
+            parse_mode="HTML"
         )
 
         return
 
-    # ==================================
+    # =========================
     # ВАРИАНТ 2:
-    #
-    # Обнять @username
-    # ==================================
+    # "Обнять @username"
+    # =========================
 
     parts = text.split()
 
-    if len(parts) < 2:
-        await message.answer(
-            "Чтобы кого-нибудь обнять, ответь на его сообщение "
-            "словом «Обнять» или напиши:\n\n"
-            "Обнять @username"
-        )
-        return
+    if len(parts) >= 2 and parts[0].lower() == "обнять":
 
-    username = parts[1].strip()
+        username = parts[1]
 
-    if not username.startswith("@"):
-        await message.answer(
-            "Используй формат:\n"
-            "Обнять @username"
-        )
+        if not username.startswith("@"):
+            await message.answer(
+                "Используй: Обнять @username"
+            )
+            return
+
+        try:
+            target = await bot.get_chat(username)
+
+            sender_name = html.escape(sender.full_name)
+            target_name = html.escape(
+                target.full_name or username
+            )
+
+            await message.answer(
+                f'🤗 | <a href="tg://user?id={sender.id}">'
+                f'{sender_name}</a> обнял '
+                f'<a href="tg://user?id={target.id}">'
+                f'{target_name}</a>',
+                parse_mode="HTML"
+            )
+
+        except Exception:
+            await message.answer(
+                "Не удалось найти этого пользователя."
+            )
+
         return
 
     username = username[1:]
