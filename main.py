@@ -1,10 +1,10 @@
+```python
 import os
 import asyncio
 import logging
 import html
 
 import asyncpg
-
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -14,7 +14,6 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton
 )
-from aiogram.filters import Command
 
 
 # =========================
@@ -80,83 +79,156 @@ main_menu = ReplyKeyboardMarkup(
 async def init_database():
     global db_pool
 
-    db_pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=1,
-        max_size=5
-    )
+    logger.info("Connecting to PostgreSQL...")
 
-    async with db_pool.acquire() as connection:
+    try:
+        db_pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=5,
+            command_timeout=30
+        )
 
-        await connection.execute("""
-            CREATE TABLE IF NOT EXISTS base_users (
-                id BIGINT PRIMARY KEY,
-                first_name TEXT,
-                last_name TEXT,
-                username TEXT,
-                first_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        async with db_pool.acquire() as connection:
+
+            # Создаём таблицу
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS base_users (
+                    id BIGINT PRIMARY KEY,
+                    first_name TEXT,
+                    last_name TEXT,
+                    username TEXT,
+                    first_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
+            # Проверяем, куда именно подключились
+            current_database = await connection.fetchval(
+                "SELECT current_database()"
             )
-        """)
 
-    logger.info("Database connected")
+            current_schema = await connection.fetchval(
+                "SELECT current_schema()"
+            )
 
+            users_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM public.base_users"
+            )
+
+            logger.info(
+                f"PostgreSQL connected successfully | "
+                f"database={current_database} | "
+                f"schema={current_schema} | "
+                f"users={users_count}"
+            )
+
+    except Exception:
+        logger.exception("Ошибка подключения к PostgreSQL")
+        raise
+
+
+# =========================
+# SAVE USER
+# =========================
 
 async def save_user(message: Message):
     """
-    Добавляет пользователя в БД при первом сообщении.
-    При последующих сообщениях обновляет его данные,
-    но НЕ меняет first_message_at.
+    Сохраняет пользователя в PostgreSQL.
+
+    При первом сообщении создаёт запись.
+    При следующих сообщениях обновляет:
+    - first_name
+    - last_name
+    - username
+
+    first_message_at не изменяется.
     """
+
+    global db_pool
+
+    if db_pool is None:
+        logger.error("Database pool is not initialized")
+        return
 
     user = message.from_user
 
     if not user:
+        logger.warning("message.from_user is None")
         return
 
-    async with db_pool.acquire() as connection:
-
-        await connection.execute("""
-            INSERT INTO base_users (
-                id,
-                first_name,
-                last_name,
-                username
-            )
-            VALUES ($1, $2, $3, $4)
-
-            ON CONFLICT (id)
-            DO UPDATE SET
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
-                username = EXCLUDED.username
-        """,
-            user.id,
-            user.first_name,
-            user.last_name,
-            user.username
-        )
-
     logger.info(
-        f"User saved: "
-        f"id={user.id}, "
-        f"username={user.username!r}"
+        f"Trying to save user | "
+        f"id={user.id} | "
+        f"username={user.username!r} | "
+        f"name={user.full_name!r}"
     )
+
+    try:
+        async with db_pool.acquire() as connection:
+
+            await connection.execute("""
+                INSERT INTO public.base_users (
+                    id,
+                    first_name,
+                    last_name,
+                    username
+                )
+                VALUES ($1, $2, $3, $4)
+
+                ON CONFLICT (id)
+                DO UPDATE SET
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    username = EXCLUDED.username
+            """,
+                user.id,
+                user.first_name,
+                user.last_name,
+                user.username
+            )
+
+            # Проверяем, что пользователь действительно записался
+            saved_user = await connection.fetchrow("""
+                SELECT
+                    id,
+                    first_name,
+                    last_name,
+                    username,
+                    first_message_at
+                FROM public.base_users
+                WHERE id = $1
+            """, user.id)
+
+            if saved_user:
+                logger.info(
+                    f"User saved successfully | "
+                    f"id={saved_user['id']} | "
+                    f"username={saved_user['username']!r} | "
+                    f"first_message_at={saved_user['first_message_at']}"
+                )
+            else:
+                logger.error(
+                    f"User was NOT found after INSERT | "
+                    f"id={user.id}"
+                )
+
+    except Exception:
+        logger.exception(
+            f"Ошибка сохранения пользователя | id={user.id}"
+        )
 
 
 # =========================
-# MIDDLEWARE-LIKE USER SAVE
+# MESSAGE HANDLER
 # =========================
 
 @dp.message()
 async def save_every_user(message: Message):
-    """
-    Этот обработчик будет сохранять каждого пользователя,
-    который отправил сообщение боту.
-    """
 
+    # Сначала сохраняем пользователя
     await save_user(message)
 
-    # Передаём обработку дальше вручную
+    # Затем обрабатываем сообщение
     await process_message(message)
 
 
@@ -206,13 +278,17 @@ async def process_message(message: Message):
 
         await message.answer(
             "📋 <b>Команды бота</b>\n\n"
+
             "🤗 <b>Обнять</b>\n"
             "Ответь на сообщение пользователя "
             "словом «Обнять».\n\n"
+
             "💬 <b>Ответить</b>\n"
             "Ответь на сообщение пользователя "
             "словом «Ответить».\n\n"
+
             "➕ Новые команды можно добавлять сюда.",
+
             parse_mode="HTML"
         )
 
@@ -260,6 +336,7 @@ async def process_message(message: Message):
             f'{sender_name}</a> обнял '
             f'<a href="tg://user?id={target.id}">'
             f'{target_name}</a>',
+
             parse_mode="HTML"
         )
 
@@ -295,6 +372,7 @@ async def process_message(message: Message):
             f'{sender_name}</a> ответил '
             f'<a href="tg://user?id={target.id}">'
             f'{target_name}</a>',
+
             parse_mode="HTML"
         )
 
