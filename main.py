@@ -284,9 +284,7 @@ async def process_message(message: Message):
 
             "💬 <b>Ответить</b>\n"
             "Ответь на сообщение пользователя "
-            "словом «Ответить».\n\n"
-
-            "➕ Новые команды можно добавлять сюда.",
+            "словом «Ответить».\n\n",
 
             parse_mode="HTML"
         )
@@ -381,9 +379,25 @@ async def process_message(message: Message):
     # ОБЫЧНЫЙ ТЕКСТ
     # =========================
 
-    logger.info(
-        f"Обычное сообщение: {text!r}"
-    )
+async def main():
+    logger.info("=== MAIN STARTED ===")
+
+    await init_database()
+    logger.info("=== DATABASE READY ===")
+
+    await start_web_server()
+    logger.info("=== WEB SERVER READY ===")
+
+    logger.info("=== STARTING TELEGRAM POLLING ===")
+
+    try:
+        await dp.start_polling(bot)
+    except Exception:
+        logger.exception("Ошибка во время работы бота")
+    finally:
+        if db_pool:
+            await db_pool.close()
+        await bot.session.close()
 
 
 # =========================
