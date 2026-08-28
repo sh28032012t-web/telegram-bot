@@ -1,12 +1,13 @@
 import os
 import asyncio
 import logging
+import html
 
 from aiohttp import web
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 from aiogram.filters import Command
 
 
@@ -43,21 +44,29 @@ dp = Dispatcher()
 
 
 # =========================
-# MENU
+# FUNCTIONS
 # =========================
 
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text="🤖 О боте"),
-            KeyboardButton(text="📋 Команды")
-        ],
-        [
-            KeyboardButton(text="💬 Это мой бот")
-        ]
-    ],
-    resize_keyboard=True
-)
+def get_user_name(user):
+    """
+    Получает отображаемое имя пользователя.
+    """
+    if user.username:
+        return f"@{user.username}"
+
+    if user.full_name:
+        return user.full_name
+
+    return "пользователь"
+
+
+def user_link(user):
+    """
+    Создаёт кликабельное упоминание пользователя.
+    """
+    name = html.escape(get_user_name(user))
+
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 
 # =========================
@@ -68,87 +77,134 @@ main_menu = ReplyKeyboardMarkup(
 async def handle_start(message: Message):
 
     logger.info(
-        f"Получена команда /start от пользователя {message.from_user.id}"
+        f"/start от {message.from_user.id}"
     )
 
     await message.answer(
         "Привет! 👋\n\n"
-        "Выбери действие в меню:",
-        reply_markup=main_menu
+        "Команды:\n"
+        "Обнять @username\n\n"
+        "Или ответь на сообщение пользователя "
+        "словом «Обнять»."
     )
 
 
 # =========================
-# КНОПКА "О БОТЕ"
-# =========================
-
-@dp.message(lambda message: message.text == "🤖 О боте")
-async def about_bot(message: Message):
-
-    await message.answer(
-        "🤖 Я Telegram-бот.\n\n"
-        "Я умею отвечать на сообщения и выполнять команды."
-    )
-
-
-# =========================
-# КНОПКА "КОМАНДЫ"
-# =========================
-
-@dp.message(lambda message: message.text == "📋 Команды")
-async def commands(message: Message):
-
-    await message.answer(
-        "📋 Доступные команды:\n\n"
-        "/start — открыть меню\n"
-        "/help — помощь"
-    )
-
-
-# =========================
-# /HELP
-# =========================
-
-@dp.message(Command("help"))
-async def help_command(message: Message):
-
-    await message.answer(
-        "ℹ️ Используй кнопки меню или команду /start."
-    )
-
-
-# =========================
-# КНОПКА "ЭТО МОЙ БОТ"
-# =========================
-
-@dp.message(lambda message: message.text == "💬 Это мой бот")
-async def my_bot_button(message: Message):
-
-    await message.answer(
-        "Я бот, который выполняет команды 🙂"
-    )
-
-
-# =========================
-# ОБЫЧНЫЕ СООБЩЕНИЯ
+# ОБНЯТЬ
 # =========================
 
 @dp.message()
 async def handle_message(message: Message):
 
-    logger.info(
-        f"Получено сообщение: {message.text!r}, "
-        f"chat_id={message.chat.id}"
-    )
-
     if not message.text:
         return
 
-    text = message.text.lower().strip()
+    text = message.text.strip()
 
-    if text == "это мой бот":
+    logger.info(
+        f"Сообщение: {text!r}, "
+        f"chat_id={message.chat.id}"
+    )
+
+    # Проверяем, начинается ли сообщение с "Обнять"
+    if not text.lower().startswith("обнять"):
+        return
+
+    # Кто написал "Обнять"
+    if not message.from_user:
+        return
+
+    sender = message.from_user
+
+    # ==================================
+    # ВАРИАНТ 1:
+    # Ответ на сообщение
+    #
+    # Обнять
+    # ↑ это reply на сообщение пользователя
+    # ==================================
+
+    if message.reply_to_message:
+
+        target = message.reply_to_message.from_user
+
+        if not target:
+            await message.answer(
+                "Не удалось определить пользователя."
+            )
+            return
+
+        sender_name = user_link(sender)
+        target_name = user_link(target)
+
         await message.answer(
-            "Я бот, который выполняет команды 🙂"
+            f"🤗 | {sender_name} обнял {target_name}"
+        )
+
+        return
+
+    # ==================================
+    # ВАРИАНТ 2:
+    #
+    # Обнять @username
+    # ==================================
+
+    parts = text.split()
+
+    if len(parts) < 2:
+        await message.answer(
+            "Чтобы кого-нибудь обнять, ответь на его сообщение "
+            "словом «Обнять» или напиши:\n\n"
+            "Обнять @username"
+        )
+        return
+
+    username = parts[1].strip()
+
+    if not username.startswith("@"):
+        await message.answer(
+            "Используй формат:\n"
+            "Обнять @username"
+        )
+        return
+
+    username = username[1:]
+
+    try:
+
+        # Ищем пользователя по username
+        target = await bot.get_chat(f"@{username}")
+
+        sender_name = user_link(sender)
+
+        # Для get_chat может отсутствовать from_user,
+        # поэтому используем id и имя из Chat.
+        target_name = html.escape(
+            target.username
+            and f"@{target.username}"
+            or target.full_name
+            or "пользователь"
+        )
+
+        target_link = (
+            f'<a href="tg://user?id={target.id}">'
+            f'{target_name}'
+            f'</a>'
+        )
+
+        await message.answer(
+            f"🤗 | {sender_name} обнял {target_link}"
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            f"Не удалось найти пользователя @{username}"
+        )
+
+        await message.answer(
+            "Не получилось найти этого пользователя 😔\n\n"
+            "Проверь username и попробуй ещё раз."
         )
 
 
