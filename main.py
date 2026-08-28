@@ -16,6 +16,8 @@ from aiogram.types import (
     FSInputFile,
 )
 
+from lucky_blocks import LUCKY_BLOCKS
+
 
 # ============================================================
 # LOGGING
@@ -39,76 +41,40 @@ BOT_TOKEN = os.getenv("TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not BOT_TOKEN:
-    raise ValueError("Переменная TOKEN не найдена")
+    raise ValueError(
+        "Переменная TOKEN не найдена"
+    )
 
 if not DATABASE_URL:
-    raise ValueError("Переменная DATABASE_URL не найдена")
+    raise ValueError(
+        "Переменная DATABASE_URL не найдена"
+    )
 
 
 # ============================================================
 # BOT
 # ============================================================
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(
+    token=BOT_TOKEN
+)
+
 dp = Dispatcher()
 
 db_pool = None
 
 
 # ============================================================
-# ЛАКИ БЛОКИ
+# ПРОВЕРКА ЛАКИ БЛОКОВ
 # ============================================================
 
-LUCKY_BLOCKS = {
-    "block_1": "🎁 Лаки блок #1",
-    "block_2": "🎁 Лаки блок #2",
-    "block_3": "🎁 Лаки блок #3",
-}
+def get_enabled_blocks():
 
-
-# ============================================================
-# НАГРАДЫ
-# ============================================================
-#
-# A = 50%
-# B = 30%
-# C = 20%
-#
-
-REWARDS = [
-    ("A", 50),
-    ("B", 30),
-    ("C", 20),
-]
-
-
-RARITIES = {
-    "A": "Обычная",
-    "B": "Редкая",
-    "C": "Легендарная",
-}
-
-
-# ============================================================
-# ФОТО
-# ============================================================
-#
-# Файлы должны находиться в папке photos:
-#
-# photos/A.webp
-# photos/B.webp
-# photos/C.webp
-#
-# ВАЖНО:
-# На Render Linux регистр букв имеет значение.
-# A.webp != a.webp
-#
-
-PHOTO_PATHS = {
-    "A": "photos/A.webp",
-    "B": "photos/B.webp",
-    "C": "photos/C.webp",
-}
+    return {
+        block_id: block
+        for block_id, block in LUCKY_BLOCKS.items()
+        if block.get("enabled", True)
+    }
 
 
 # ============================================================
@@ -118,39 +84,48 @@ PHOTO_PATHS = {
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [
-            KeyboardButton(text="👤 Профиль"),
+            KeyboardButton(
+                text="👤 Профиль"
+            )
         ],
         [
-            KeyboardButton(text="🎁 Лаки блоки"),
+            KeyboardButton(
+                text="🎁 Лаки блоки"
+            )
         ],
     ],
     resize_keyboard=True,
 )
 
 
-lucky_blocks_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(
-                text=LUCKY_BLOCKS["block_1"]
-            ),
-            KeyboardButton(
-                text=LUCKY_BLOCKS["block_2"]
-            ),
-        ],
-        [
-            KeyboardButton(
-                text=LUCKY_BLOCKS["block_3"]
-            ),
-        ],
+def create_lucky_blocks_menu():
+
+    enabled_blocks = get_enabled_blocks()
+
+    buttons = []
+
+    for block_id, block in enabled_blocks.items():
+
+        buttons.append(
+            [
+                KeyboardButton(
+                    text=block["name"]
+                )
+            ]
+        )
+
+    buttons.append(
         [
             KeyboardButton(
                 text="◀️ Назад"
-            ),
-        ],
-    ],
-    resize_keyboard=True,
-)
+            )
+        ]
+    )
+
+    return ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+    )
 
 
 # ============================================================
@@ -183,7 +158,8 @@ async def init_database():
                 last_name TEXT,
                 username TEXT,
                 rank INTEGER NOT NULL DEFAULT 1,
-                first_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                first_message_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW()
             )
             """
         )
@@ -191,7 +167,8 @@ async def init_database():
         await connection.execute(
             """
             ALTER TABLE public.base_users
-            ADD COLUMN IF NOT EXISTS rank INTEGER NOT NULL DEFAULT 1
+            ADD COLUMN IF NOT EXISTS rank
+            INTEGER NOT NULL DEFAULT 1
             """
         )
 
@@ -232,6 +209,7 @@ async def save_user(message: Message):
                 last_name = EXCLUDED.last_name,
                 username = EXCLUDED.username
             """,
+
             user.id,
             user.first_name,
             user.last_name,
@@ -243,7 +221,9 @@ async def save_user(message: Message):
 # GET USER RANK
 # ============================================================
 
-async def get_user_rank(user_id: int) -> int:
+async def get_user_rank(
+    user_id: int
+) -> int:
 
     if db_pool is None:
         return 1
@@ -267,7 +247,9 @@ async def get_user_rank(user_id: int) -> int:
 # ============================================================
 
 @dp.message(CommandStart())
-async def start_handler(message: Message):
+async def start_handler(
+    message: Message
+):
 
     await save_user(message)
 
@@ -282,8 +264,12 @@ async def start_handler(message: Message):
 # ПРОФИЛЬ
 # ============================================================
 
-@dp.message(F.text == "👤 Профиль")
-async def profile_handler(message: Message):
+@dp.message(
+    F.text == "👤 Профиль"
+)
+async def profile_handler(
+    message: Message
+):
 
     await save_user(message)
 
@@ -309,16 +295,30 @@ async def profile_handler(message: Message):
 # ЛАКИ БЛОКИ — МЕНЮ
 # ============================================================
 
-@dp.message(F.text == "🎁 Лаки блоки")
+@dp.message(
+    F.text == "🎁 Лаки блоки"
+)
 async def lucky_blocks_handler(
     message: Message
 ):
 
     await save_user(message)
 
+    menu = create_lucky_blocks_menu()
+
+    if not get_enabled_blocks():
+
+        await message.answer(
+            "😔 Сейчас нет доступных "
+            "лаки блоков.",
+            reply_markup=main_menu,
+        )
+
+        return
+
     await message.answer(
         "🎁 Выбери лаки блок:",
-        reply_markup=lucky_blocks_menu,
+        reply_markup=menu,
     )
 
 
@@ -326,8 +326,12 @@ async def lucky_blocks_handler(
 # НАЗАД
 # ============================================================
 
-@dp.message(F.text == "◀️ Назад")
-async def back_handler(message: Message):
+@dp.message(
+    F.text == "◀️ Назад"
+)
+async def back_handler(
+    message: Message
+):
 
     await message.answer(
         "Главное меню:",
@@ -336,40 +340,53 @@ async def back_handler(message: Message):
 
 
 # ============================================================
+# НАЙТИ БЛОК ПО НАЗВАНИЮ
+# ============================================================
+
+def find_block_by_name(
+    block_name: str
+):
+
+    for block_id, block in get_enabled_blocks().items():
+
+        if block["name"] == block_name:
+
+            return block_id, block
+
+    return None, None
+
+
+# ============================================================
 # ОТКРЫТИЕ ЛАКИ БЛОКА
 # ============================================================
 
 async def open_lucky_block(
-    message: Message
+    message: Message,
+    block_id: str,
+    block: dict,
 ):
 
     await save_user(message)
 
+    rewards = block["rewards"]
+
     # --------------------------------------------------------
-    # Выбираем награду
+    # Выбираем награду по шансам
     # --------------------------------------------------------
 
     result = random.choices(
-        population=[
-            "A",
-            "B",
-            "C",
-        ],
+        population=rewards,
         weights=[
-            50,
-            30,
-            20,
+            reward["chance"]
+            for reward in rewards
         ],
         k=1,
     )[0]
 
-    # --------------------------------------------------------
-    # Получаем информацию о награде
-    # --------------------------------------------------------
-
-    chance = dict(REWARDS)[result]
-
-    rarity = RARITIES[result]
+    reward_id = result["id"]
+    rarity = result["rarity"]
+    chance = result["chance"]
+    photo_path = result["photo"]
 
     # --------------------------------------------------------
     # Текст результата
@@ -377,25 +394,23 @@ async def open_lucky_block(
 
     caption = (
         "🎉 Лаки блок открыт!\n\n"
-        f"🏆 Награда: {result}\n"
+        f"🎁 {block['name']}\n\n"
+        f"🏆 Награда: {reward_id}\n"
         f"✨ Редкость: {rarity}\n"
         f"🎲 Шанс: {chance}%"
     )
 
-    # --------------------------------------------------------
-    # Получаем путь к фотографии
-    # --------------------------------------------------------
-
-    photo_path = PHOTO_PATHS.get(
-        result
+    logger.info(
+        f"User opened {block_id} | "
+        f"reward={reward_id} | "
+        f"chance={chance}%"
     )
 
-    if not photo_path:
+    # --------------------------------------------------------
+    # Проверяем фотографию
+    # --------------------------------------------------------
 
-        logger.error(
-            f"Для награды {result} "
-            "не указан путь к фотографии"
-        )
+    if not photo_path:
 
         await message.answer(
             caption
@@ -403,27 +418,24 @@ async def open_lucky_block(
 
         return
 
-    # --------------------------------------------------------
-    # Проверяем существование файла
-    # --------------------------------------------------------
-
     if not os.path.isfile(photo_path):
 
         logger.error(
-            f"Фото не найдено: {photo_path}"
+            f"Фото не найдено: "
+            f"{photo_path}"
         )
 
         await message.answer(
             caption
             + "\n\n"
-            + "⚠️ Фото для этой награды "
-              "не найдено на сервере."
+            "⚠️ Фото этой награды "
+            "не найдено."
         )
 
         return
 
     # --------------------------------------------------------
-    # Отправляем фотографию
+    # Отправляем фото
     # --------------------------------------------------------
 
     try:
@@ -438,7 +450,7 @@ async def open_lucky_block(
         )
 
         logger.info(
-            f"Фото успешно отправлено: "
+            f"Photo sent successfully: "
             f"{photo_path}"
         )
 
@@ -448,28 +460,49 @@ async def open_lucky_block(
             "Не удалось отправить фотографию"
         )
 
-        # Если фото не отправилось,
-        # всё равно показываем результат
         await message.answer(
             caption
         )
 
 
 # ============================================================
-# ОБРАБОТКА КНОПОК ЛАКИ БЛОКОВ
+# КНОПКИ ЛАКИ БЛОКОВ
 # ============================================================
 
 @dp.message(
     F.text.in_(
-        LUCKY_BLOCKS.values()
+        [
+            block["name"]
+            for block in LUCKY_BLOCKS.values()
+            if block.get("enabled", True)
+        ]
     )
 )
 async def lucky_block_open_handler(
     message: Message
 ):
 
+    if not message.text:
+        return
+
+    block_id, block = find_block_by_name(
+        message.text
+    )
+
+    if block is None:
+
+        await message.answer(
+            "⚠️ Этот лаки блок сейчас "
+            "недоступен.",
+            reply_markup=main_menu,
+        )
+
+        return
+
     await open_lucky_block(
-        message
+        message,
+        block_id,
+        block,
     )
 
 
@@ -552,13 +585,31 @@ async def main():
     )
 
     # --------------------------------------------------------
+    # Проверяем конфигурацию блоков
+    # --------------------------------------------------------
+
+    enabled_blocks = get_enabled_blocks()
+
+    logger.info(
+        f"Lucky blocks loaded: "
+        f"{len(enabled_blocks)}"
+    )
+
+    for block_id, block in enabled_blocks.items():
+
+        logger.info(
+            f"Loaded block: "
+            f"{block_id} - {block['name']}"
+        )
+
+    # --------------------------------------------------------
     # PostgreSQL
     # --------------------------------------------------------
 
     await init_database()
 
     # --------------------------------------------------------
-    # Render Web Server
+    # Web Server для Render
     # --------------------------------------------------------
 
     web_runner = await start_web_server()
@@ -590,7 +641,7 @@ async def main():
         )
 
         # ----------------------------------------------------
-        # Запускаем polling
+        # Polling
         # ----------------------------------------------------
 
         await dp.start_polling(
