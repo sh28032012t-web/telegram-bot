@@ -73,21 +73,7 @@ def user_link(user):
 # /START
 # =========================
 
-@dp.message(Command("start"))
-async def handle_start(message: Message):
-
-    logger.info(
-        f"/start от {message.from_user.id}"
-    )
-
-    await message.answer(
-        "Привет! 👋\n\n"
-        "Команды:\n"
-        "Обнять @username\n\n"
-        "Или ответь на сообщение пользователя "
-        "словом «Обнять»."
-    )
-
+#
 
 # =========================
 # ОБНЯТЬ
