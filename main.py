@@ -11,25 +11,25 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
-    KeyboardButton
+    KeyboardButton,
 )
 
 
-# =========================
+# ============================================================
 # LOGGING
-# =========================
+# ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 logger = logging.getLogger(__name__)
 
 
-# =========================
+# ============================================================
 # ENVIRONMENT
-# =========================
+# ============================================================
 
 load_dotenv()
 
@@ -43,9 +43,9 @@ if not DATABASE_URL:
     raise ValueError("Переменная DATABASE_URL не найдена")
 
 
-# =========================
+# ============================================================
 # BOT
-# =========================
+# ============================================================
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -53,27 +53,27 @@ dp = Dispatcher()
 db_pool = None
 
 
-# =========================
+# ============================================================
 # MENU
-# =========================
+# ============================================================
 
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [
             KeyboardButton(text="🤖 О боте"),
-            KeyboardButton(text="📋 Команды")
+            KeyboardButton(text="📋 Команды"),
         ],
         [
-            KeyboardButton(text="💬 Это мой бот")
-        ]
+            KeyboardButton(text="💬 Это мой бот"),
+        ],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )
 
 
-# =========================
+# ============================================================
 # DATABASE
-# =========================
+# ============================================================
 
 async def init_database():
     global db_pool
@@ -85,15 +85,21 @@ async def init_database():
             DATABASE_URL,
             min_size=1,
             max_size=5,
-            command_timeout=30
+            command_timeout=30,
         )
 
         async with db_pool.acquire() as connection:
 
-            # Создаём таблицу
+            # Создаём таблицу только если её ещё нет.
+            #
+            # ВАЖНО:
+            # В существующей таблице у тебя уже есть tg_id,
+            # поэтому save_user() ниже работает именно с tg_id.
+
             await connection.execute("""
-                CREATE TABLE IF NOT EXISTS base_users (
-                    id BIGINT PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS public.base_users (
+                    id BIGSERIAL PRIMARY KEY,
+                    tg_id BIGINT NOT NULL UNIQUE,
                     first_name TEXT,
                     last_name TEXT,
                     username TEXT,
@@ -101,7 +107,6 @@ async def init_database():
                 )
             """)
 
-            # Проверяем, куда именно подключились
             current_database = await connection.fetchval(
                 "SELECT current_database()"
             )
@@ -115,7 +120,7 @@ async def init_database():
             )
 
             logger.info(
-                f"PostgreSQL connected successfully | "
+                "PostgreSQL connected successfully | "
                 f"database={current_database} | "
                 f"schema={current_schema} | "
                 f"users={users_count}"
@@ -126,19 +131,21 @@ async def init_database():
         raise
 
 
-# =========================
+# ============================================================
 # SAVE USER
-# =========================
+# ============================================================
 
 async def save_user(message: Message):
     """
     Сохраняет пользователя в PostgreSQL.
 
-    При первом сообщении создаёт запись.
-    При следующих сообщениях обновляет:
-    - first_name
-    - last_name
-    - username
+    tg_id = Telegram ID пользователя.
+    id = внутренний ID записи в PostgreSQL.
+
+    Если пользователь уже существует:
+    - обновляем first_name
+    - обновляем last_name
+    - обновляем username
 
     first_message_at не изменяется.
     """
@@ -156,8 +163,8 @@ async def save_user(message: Message):
         return
 
     logger.info(
-        f"Trying to save user | "
-        f"id={user.id} | "
+        "Trying to save user | "
+        f"tg_id={user.id} | "
         f"username={user.username!r} | "
         f"name={user.full_name!r}"
     )
@@ -165,61 +172,66 @@ async def save_user(message: Message):
     try:
         async with db_pool.acquire() as connection:
 
-            await connection.execute("""
+            await connection.execute(
+                """
                 INSERT INTO public.base_users (
-                    id,
+                    tg_id,
                     first_name,
                     last_name,
                     username
                 )
                 VALUES ($1, $2, $3, $4)
 
-                ON CONFLICT (id)
+                ON CONFLICT (tg_id)
                 DO UPDATE SET
                     first_name = EXCLUDED.first_name,
                     last_name = EXCLUDED.last_name,
                     username = EXCLUDED.username
-            """,
+                """,
                 user.id,
                 user.first_name,
                 user.last_name,
-                user.username
+                user.username,
             )
 
-            # Проверяем, что пользователь действительно записался
-            saved_user = await connection.fetchrow("""
+            saved_user = await connection.fetchrow(
+                """
                 SELECT
                     id,
+                    tg_id,
                     first_name,
                     last_name,
                     username,
                     first_message_at
                 FROM public.base_users
-                WHERE id = $1
-            """, user.id)
+                WHERE tg_id = $1
+                """,
+                user.id,
+            )
 
             if saved_user:
                 logger.info(
-                    f"User saved successfully | "
+                    "User saved successfully | "
                     f"id={saved_user['id']} | "
+                    f"tg_id={saved_user['tg_id']} | "
                     f"username={saved_user['username']!r} | "
                     f"first_message_at={saved_user['first_message_at']}"
                 )
             else:
                 logger.error(
-                    f"User was NOT found after INSERT | "
-                    f"id={user.id}"
+                    "User was NOT found after INSERT | "
+                    f"tg_id={user.id}"
                 )
 
     except Exception:
         logger.exception(
-            f"Ошибка сохранения пользователя | id={user.id}"
+            f"Ошибка сохранения пользователя | tg_id={user.id}"
         )
 
 
-# =========================
+# ============================================================
 # MESSAGE HANDLER
-# =========================
+# ============================================================
 
 @dp.message()
 async def save_every_user(message: Message):
@@ -231,9 +243,9 @@ async def save_every_user(message: Message):
     await process_message(message)
 
 
-# =========================
+# ============================================================
 # MESSAGE PROCESSING
-# =========================
+# ============================================================
 
 async def process_message(message: Message):
 
@@ -242,23 +254,23 @@ async def process_message(message: Message):
 
     text = message.text.strip()
 
-    # =========================
+    # ========================================================
     # /START
-    # =========================
+    # ========================================================
 
     if text.lower() == "/start":
 
         await message.answer(
             "Привет! 👋\n\n"
             "Выбери действие в меню:",
-            reply_markup=main_menu
+            reply_markup=main_menu,
         )
 
         return
 
-    # =========================
+    # ========================================================
     # О БОТЕ
-    # =========================
+    # ========================================================
 
     if text == "🤖 О боте":
 
@@ -269,9 +281,9 @@ async def process_message(message: Message):
 
         return
 
-    # =========================
+    # ========================================================
     # КОМАНДЫ
-    # =========================
+    # ========================================================
 
     if text == "📋 Команды":
 
@@ -285,15 +297,15 @@ async def process_message(message: Message):
             "💬 <b>Ответить</b>\n"
             "Ответь на сообщение пользователя "
             "словом «Ответить».\n\n",
-
-            parse_mode="HTML"
+            
+            parse_mode="HTML",
         )
 
         return
 
-    # =========================
+    # ========================================================
     # ЭТО МОЙ БОТ
-    # =========================
+    # ========================================================
 
     if text == "💬 Это мой бот":
 
@@ -303,9 +315,9 @@ async def process_message(message: Message):
 
         return
 
-    # =========================
+    # ========================================================
     # ОБНЯТЬ
-    # =========================
+    # ========================================================
 
     if text.lower() == "обнять":
 
@@ -333,15 +345,14 @@ async def process_message(message: Message):
             f'{sender_name}</a> обнял '
             f'<a href="tg://user?id={target.id}">'
             f'{target_name}</a>',
-
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         return
 
-    # =========================
+    # ========================================================
     # ОТВЕТИТЬ
-    # =========================
+    # ========================================================
 
     if text.lower() == "ответить":
 
@@ -369,43 +380,25 @@ async def process_message(message: Message):
             f'{sender_name}</a> ответил '
             f'<a href="tg://user?id={target.id}">'
             f'{target_name}</a>',
-
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         return
 
-    # =========================
+    # ========================================================
     # ОБЫЧНЫЙ ТЕКСТ
-    # =========================
+    # ========================================================
 
-async def main():
-    logger.info("=== MAIN STARTED ===")
-
-    await init_database()
-    logger.info("=== DATABASE READY ===")
-
-    await start_web_server()
-    logger.info("=== WEB SERVER READY ===")
-
-    logger.info("=== STARTING TELEGRAM POLLING ===")
-
-    try:
-        await dp.start_polling(bot)
-    except Exception:
-        logger.exception("Ошибка во время работы бота")
-    finally:
-        if db_pool:
-            await db_pool.close()
-        await bot.session.close()
+    logger.info(
+        f"Обычное сообщение: {text!r}"
+    )
 
 
-# =========================
-# WEB SERVER
-# =========================
+# ============================================================
+# WEB SERVER FOR RENDER
+# ============================================================
 
 async def health_check(request):
-
     return web.Response(
         text="Bot is running!"
     )
@@ -417,7 +410,7 @@ async def start_web_server():
 
     app.router.add_get(
         "/",
-        health_check
+        health_check,
     )
 
     runner = web.AppRunner(app)
@@ -425,13 +418,13 @@ async def start_web_server():
     await runner.setup()
 
     port = int(
-        os.getenv("PORT", 10000)
+        os.getenv("PORT", "10000")
     )
 
     site = web.TCPSite(
         runner,
         "0.0.0.0",
-        port
+        port,
     )
 
     await site.start()
@@ -440,41 +433,104 @@ async def start_web_server():
         f"Web server started on port {port}"
     )
 
+    return runner
 
-# =========================
+
+# ============================================================
 # MAIN
-# =========================
+# ============================================================
 
 async def main():
 
+    logger.info("========================================")
+    logger.info("STARTING BOT")
+    logger.info("========================================")
+
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
+
     await init_database()
 
-    await start_web_server()
+    logger.info("Database initialization completed")
 
-    logger.info("Bot started!")
+    # --------------------------------------------------------
+    # WEB SERVER
+    # --------------------------------------------------------
+
+    web_runner = await start_web_server()
+
+    logger.info("Web server initialization completed")
+
+    # --------------------------------------------------------
+    # TELEGRAM
+    # --------------------------------------------------------
 
     try:
+
+        bot_info = await bot.get_me()
+
+        logger.info(
+            "Telegram connection successful | "
+            f"bot_id={bot_info.id} | "
+            f"username=@{bot_info.username}"
+        )
+
+        # Если раньше у бота был установлен webhook,
+        # polling не сможет нормально работать.
+        #
+        # Удаляем webhook перед запуском polling.
+
+        await bot.delete_webhook(
+            drop_pending_updates=False
+        )
+
+        logger.info(
+            "Webhook removed. Starting polling..."
+        )
+
+        logger.info("BOT STARTED SUCCESSFULLY")
 
         await dp.start_polling(bot)
 
     except Exception:
 
         logger.exception(
-            "Ошибка во время работы бота"
+            "Критическая ошибка во время работы бота"
         )
+
+        raise
 
     finally:
 
-        if db_pool:
+        logger.info("Stopping bot...")
+
+        if db_pool is not None:
+
             await db_pool.close()
+
+            logger.info(
+                "PostgreSQL connection pool closed"
+            )
 
         await bot.session.close()
 
+        await web_runner.cleanup()
 
-# =========================
+        logger.info("Bot stopped")
+
+
+# ============================================================
 # START
-# =========================
+# ============================================================
 
 if __name__ == "__main__":
 
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+
+    except KeyboardInterrupt:
+
+        logger.info(
+            "Bot stopped manually"
+        )
