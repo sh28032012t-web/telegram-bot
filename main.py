@@ -13,6 +13,7 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    FSInputFile,
 )
 
 
@@ -65,10 +66,14 @@ LUCKY_BLOCKS = {
 }
 
 
-# Шансы:
+# ============================================================
+# НАГРАДЫ
+# ============================================================
+#
 # A = 50%
 # B = 30%
 # C = 20%
+#
 
 REWARDS = [
     ("A", 50),
@@ -88,21 +93,18 @@ RARITIES = {
 # ФОТО
 # ============================================================
 #
-# Сюда можно вставить Telegram file_id фотографий.
+# Файлы должны находиться в папке photos:
 #
-# Пока оставляем пустыми строками.
-# В таком случае бот просто отправит текстовый результат.
+# photos/A.webp
+# photos/B.webp
+# photos/C.webp
 #
-# Пример:
-#
-# PHOTO_IDS = {
-#     "A": "AgACAgIAAxkBAA...",
-#     "B": "AgACAgIAAxkBAA...",
-#     "C": "AgACAgIAAxkBAA...",
-# }
+# ВАЖНО:
+# На Render Linux регистр букв имеет значение.
+# A.webp != a.webp
 #
 
-PHOTO_IDS = {
+PHOTO_PATHS = {
     "A": "photos/A.webp",
     "B": "photos/B.webp",
     "C": "photos/C.webp",
@@ -116,10 +118,10 @@ PHOTO_IDS = {
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [
-            KeyboardButton(text="👤 Профиль")
+            KeyboardButton(text="👤 Профиль"),
         ],
         [
-            KeyboardButton(text="🎁 Лаки блоки")
+            KeyboardButton(text="🎁 Лаки блоки"),
         ],
     ],
     resize_keyboard=True,
@@ -139,10 +141,12 @@ lucky_blocks_menu = ReplyKeyboardMarkup(
         [
             KeyboardButton(
                 text=LUCKY_BLOCKS["block_3"]
-            )
+            ),
         ],
         [
-            KeyboardButton(text="◀️ Назад")
+            KeyboardButton(
+                text="◀️ Назад"
+            ),
         ],
     ],
     resize_keyboard=True,
@@ -154,9 +158,12 @@ lucky_blocks_menu = ReplyKeyboardMarkup(
 # ============================================================
 
 async def init_database():
+
     global db_pool
 
-    logger.info("Connecting to PostgreSQL...")
+    logger.info(
+        "Connecting to PostgreSQL..."
+    )
 
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
@@ -188,7 +195,9 @@ async def init_database():
             """
         )
 
-    logger.info("PostgreSQL connected successfully")
+    logger.info(
+        "PostgreSQL connected successfully"
+    )
 
 
 # ============================================================
@@ -223,7 +232,6 @@ async def save_user(message: Message):
                 last_name = EXCLUDED.last_name,
                 username = EXCLUDED.username
             """,
-
             user.id,
             user.first_name,
             user.last_name,
@@ -255,7 +263,7 @@ async def get_user_rank(user_id: int) -> int:
 
 
 # ============================================================
-# /START
+# START
 # ============================================================
 
 @dp.message(CommandStart())
@@ -284,7 +292,9 @@ async def profile_handler(message: Message):
 
     user = message.from_user
 
-    rank = await get_user_rank(user.id)
+    rank = await get_user_rank(
+        user.id
+    )
 
     await message.answer(
         f"👤 Профиль\n\n"
@@ -300,7 +310,9 @@ async def profile_handler(message: Message):
 # ============================================================
 
 @dp.message(F.text == "🎁 Лаки блоки")
-async def lucky_blocks_handler(message: Message):
+async def lucky_blocks_handler(
+    message: Message
+):
 
     await save_user(message)
 
@@ -327,34 +339,41 @@ async def back_handler(message: Message):
 # ОТКРЫТИЕ ЛАКИ БЛОКА
 # ============================================================
 
-async def open_lucky_block(message: Message):
+async def open_lucky_block(
+    message: Message
+):
 
     await save_user(message)
 
-    # Выбираем награду по вероятности
+    # --------------------------------------------------------
+    # Выбираем награду
+    # --------------------------------------------------------
+
     result = random.choices(
         population=[
-            item[0]
-            for item in REWARDS
+            "A",
+            "B",
+            "C",
         ],
         weights=[
-            item[1]
-            for item in REWARDS
+            50,
+            30,
+            20,
         ],
         k=1,
     )[0]
 
-    # Получаем шанс
+    # --------------------------------------------------------
+    # Получаем информацию о награде
+    # --------------------------------------------------------
+
     chance = dict(REWARDS)[result]
 
-    # Получаем редкость
     rarity = RARITIES[result]
 
-    # Получаем Telegram file_id фотографии
-    photo_id = PHOTO_IDS.get(
-        result,
-        ""
-    ).strip()
+    # --------------------------------------------------------
+    # Текст результата
+    # --------------------------------------------------------
 
     caption = (
         "🎉 Лаки блок открыт!\n\n"
@@ -363,52 +382,99 @@ async def open_lucky_block(message: Message):
         f"🎲 Шанс: {chance}%"
     )
 
-    # Если фотография указана
-    if photo_id:
+    # --------------------------------------------------------
+    # Получаем путь к фотографии
+    # --------------------------------------------------------
 
-        try:
+    photo_path = PHOTO_PATHS.get(
+        result
+    )
 
-            await message.answer_photo(
-                photo=photo_id,
-                caption=caption,
-            )
+    if not photo_path:
 
-        except Exception:
+        logger.error(
+            f"Для награды {result} "
+            "не указан путь к фотографии"
+        )
 
-            logger.exception(
-                "Не удалось отправить фотографию"
-            )
+        await message.answer(
+            caption
+        )
 
-            # Если фото не отправилось,
-            # отправляем хотя бы текст
-            await message.answer(
-                caption
-            )
+        return
 
-    # Если фотографии нет
-    else:
+    # --------------------------------------------------------
+    # Проверяем существование файла
+    # --------------------------------------------------------
 
+    if not os.path.isfile(photo_path):
+
+        logger.error(
+            f"Фото не найдено: {photo_path}"
+        )
+
+        await message.answer(
+            caption
+            + "\n\n"
+            + "⚠️ Фото для этой награды "
+              "не найдено на сервере."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # Отправляем фотографию
+    # --------------------------------------------------------
+
+    try:
+
+        photo = FSInputFile(
+            photo_path
+        )
+
+        await message.answer_photo(
+            photo=photo,
+            caption=caption,
+        )
+
+        logger.info(
+            f"Фото успешно отправлено: "
+            f"{photo_path}"
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Не удалось отправить фотографию"
+        )
+
+        # Если фото не отправилось,
+        # всё равно показываем результат
         await message.answer(
             caption
         )
 
 
 # ============================================================
-# ОБРАБОТКА ЛАКИ БЛОКОВ
+# ОБРАБОТКА КНОПОК ЛАКИ БЛОКОВ
 # ============================================================
 
 @dp.message(
-    F.text.in_(LUCKY_BLOCKS.values())
+    F.text.in_(
+        LUCKY_BLOCKS.values()
+    )
 )
 async def lucky_block_open_handler(
     message: Message
 ):
 
-    await open_lucky_block(message)
+    await open_lucky_block(
+        message
+    )
 
 
 # ============================================================
-# ОБРАБОТКА НЕИЗВЕСТНЫХ СООБЩЕНИЙ
+# НЕИЗВЕСТНЫЕ СООБЩЕНИЯ
 # ============================================================
 
 @dp.message()
@@ -427,7 +493,9 @@ async def unknown_message_handler(
 # WEB SERVER FOR RENDER
 # ============================================================
 
-async def health_check(request):
+async def health_check(
+    request
+):
 
     return web.Response(
         text="Bot is running!"
@@ -440,17 +508,19 @@ async def start_web_server():
 
     app.router.add_get(
         "/",
-        health_check
+        health_check,
     )
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(
+        app
+    )
 
     await runner.setup()
 
     port = int(
         os.getenv(
             "PORT",
-            "10000"
+            "10000",
         )
     )
 
@@ -477,17 +547,28 @@ async def main():
 
     global db_pool
 
-    logger.info("STARTING BOT")
+    logger.info(
+        "STARTING BOT"
+    )
 
-    # Подключаем PostgreSQL
+    # --------------------------------------------------------
+    # PostgreSQL
+    # --------------------------------------------------------
+
     await init_database()
 
-    # Запускаем Web Server для Render
+    # --------------------------------------------------------
+    # Render Web Server
+    # --------------------------------------------------------
+
     web_runner = await start_web_server()
 
     try:
 
+        # ----------------------------------------------------
         # Проверяем Telegram
+        # ----------------------------------------------------
+
         bot_info = await bot.get_me()
 
         logger.info(
@@ -496,7 +577,10 @@ async def main():
             f"username=@{bot_info.username}"
         )
 
+        # ----------------------------------------------------
         # Удаляем webhook перед polling
+        # ----------------------------------------------------
+
         await bot.delete_webhook(
             drop_pending_updates=False
         )
@@ -505,13 +589,19 @@ async def main():
             "BOT STARTED SUCCESSFULLY"
         )
 
+        # ----------------------------------------------------
         # Запускаем polling
-        await dp.start_polling(bot)
+        # ----------------------------------------------------
+
+        await dp.start_polling(
+            bot
+        )
 
     except Exception:
 
         logger.exception(
-            "Критическая ошибка во время работы бота"
+            "Критическая ошибка "
+            "во время работы бота"
         )
 
         raise
@@ -543,7 +633,9 @@ if __name__ == "__main__":
 
     try:
 
-        asyncio.run(main())
+        asyncio.run(
+            main()
+        )
 
     except KeyboardInterrupt:
 
