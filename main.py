@@ -103,9 +103,9 @@ RARITIES = {
 #
 
 PHOTO_IDS = {
-    "A": "",
-    "B": "",
-    "C": "",
+    "A": "photos/A.webp",
+    "B": "photos/B.webp",
+    "C": "photos/C.webp",
 }
 
 
