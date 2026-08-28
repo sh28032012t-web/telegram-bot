@@ -54,11 +54,7 @@ dp = Dispatcher()
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [
-            KeyboardButton(text="🤖 О боте"),
-            KeyboardButton(text="📋 Команды")
-        ],
-        [
-            KeyboardButton(text="💬 Это мой бот")
+            KeyboardButton(text="Кто твой создатель"),
         ]
     ],
     resize_keyboard=True
