@@ -12,6 +12,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -60,10 +61,10 @@ RARITIES = {
 
 # Вставь сюда Telegram file_id фотографий A, B и C.
 # Если оставить пустым, бот отправит результат без фото.
-PHOTO_IDS = {
-    "A": "",
-    "B": "",
-    "C": "",
+PHOTO_PATHS = {
+    "A": "photos/A.webp",
+    "B": "photos/B.webp",
+    "C": "photos/C.webp",
 }
 
 
